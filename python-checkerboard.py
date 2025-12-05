@@ -1,10 +1,12 @@
 import numpy as np
 import cv2
 import os
-# from google.colab.patches import cv2_imshow # Colabで画像を表示するための特殊な関数（ローカルでは不要）
+
+# 直接ここにサイズを指定するとコマンドライン引数より優先されます。
+# 例: TILE_SIZES = [1,2,3,13,30]
+TILE_SIZES = []  # 空にしておくとコマンドライン (--tiles) を使用
 
 def show_image(img, title="image"):
-    """ローカルでの表示: まずOpenCVのウィンドウ、ダメならmatplotlib、さらにダメならファイル保存"""
     try:
         cv2.namedWindow(title, cv2.WINDOW_GUI_NORMAL)
         cv2.imshow(title, img)
@@ -13,7 +15,6 @@ def show_image(img, title="image"):
         return
     except Exception:
         pass
-
     try:
         import matplotlib.pyplot as plt
         if img.ndim == 2:
@@ -25,68 +26,77 @@ def show_image(img, title="image"):
         return
     except Exception:
         pass
-
     out = "my_checkerboard.png"
     cv2.imwrite(out, img)
     print(f"表示できなかったので '{out}' に保存しました。")
 
 def generate_checkerboard(tile_size, width, height, output_filename="checkerboard.png"):
-    """
-    指定されたサイズで市松模様を生成し、PNGで出力するシステム
-    """
-    # 画像全体を黒(0)で初期化（グレースケール）
     image = np.zeros((height, width), dtype=np.uint8)
-
-    # タイルの行数と列数を計算
     num_rows = height // tile_size
     num_cols = width // tile_size
-
-    # 各タイルにアクセスして色を決定
     for r in range(num_rows):
         for c in range(num_cols):
-            # タイルの左上隅のピクセル座標を計算
             y_start = r * tile_size
             x_start = c * tile_size
-
-            # 行インデックス(r)と列インデックス(c)の合計が偶数なら白(255)
             if (r + c) % 2 == 0:
-                # タイルの領域を白 (255) で埋める (スライス機能を利用)
-                # image[y座標の範囲, x座標の範囲] = 値
                 image[y_start : y_start + tile_size, x_start : x_start + tile_size] = 255
-
-    # 画像を指定されたファイル名でPNG形式で出力
     success = cv2.imwrite(output_filename, image)
-
     if success:
-        print(f"✅ 市松模様の画像が '{output_filename}' として出力されました！")
+        print(f"✅ 市松模様を '{output_filename}' に保存しました。")
     else:
-        print("❌ 画像の出力に失敗しました。")
-
+        print("❌ 市松模様の保存に失敗しました。")
     return image
 
+def _parse_tiles_arg(s):
+    """'1,2,3' -> [1,2,3]。空文字なら空リストを返す。"""
+    if not s:
+        return []
+    parts = [p.strip() for p in s.split(",") if p.strip() != ""]
+    return [int(p) for p in parts]
 
-# --- 実行 ---
-# 1. マスの一辺を 50ピクセル
-TILE_SIZE = 50
-# 2. 全体の幅を 400ピクセル
-TOTAL_WIDTH = 400
-# 3. 全体の高さを 300ピクセル
-TOTAL_HEIGHT = 300
+if __name__ == "__main__":
+    import argparse
 
-# --- 変更: 出力ファイル名を指定の形式にする ---
-output_filename = f"tilesize{TILE_SIZE}_w{TOTAL_WIDTH}xh{TOTAL_HEIGHT}.png"
+    parser = argparse.ArgumentParser(description="Generate checkerboard images for multiple tile sizes.")
+    parser.add_argument("--tiles", type=str, default="", help="comma-separated tile sizes, e.g. 1,2,3,13,30")
+    parser.add_argument("--width", type=int, default=512, help="image width")
+    parser.add_argument("--height", type=int, default=512, help="image height")
+    parser.add_argument("--open", action="store_true", help="open the last generated file with the OS default viewer")
+    args = parser.parse_args()
 
-generated_img = generate_checkerboard(
-    tile_size=TILE_SIZE,
-    width=TOTAL_WIDTH,
-    height=TOTAL_HEIGHT,
-    output_filename=output_filename
-)
+    # 優先順: ファイル内の TILE_SIZES が非空ならそれを使う。空なら CLI の --tiles を使う。
+    if TILE_SIZES:
+        tile_list = TILE_SIZES
+    else:
+        tile_list = _parse_tiles_arg(args.tiles)
+        if not tile_list:
+            tile_list = [2]  # デフォルト: 2
 
-print("\n--- 生成された画像 ---")
-# --- 変更: OSの既定ビューアで開く（Pillow.show と同等の挙動） ---
-try:
-    os.startfile(output_filename)
-except Exception:
-    # フォールバックで既存の表示関数を使う
-    show_image(generated_img)
+    TOTAL_WIDTH = args.width
+    TOTAL_HEIGHT = args.height
+
+    generated_files = []
+    for TILE_SIZE in tile_list:
+        output_filename = f"tilesize{TILE_SIZE}_w{TOTAL_WIDTH}xh{TOTAL_HEIGHT}.png"
+        img = generate_checkerboard(
+            tile_size=TILE_SIZE,
+            width=TOTAL_WIDTH,
+            height=TOTAL_HEIGHT,
+            output_filename=output_filename
+        )
+        generated_files.append(output_filename)
+
+    print("\n--- 生成されたファイル ---")
+    for f in generated_files:
+        print(f"- {f}")
+
+    if args.open and generated_files:
+        last = generated_files[-1]
+        try:
+            os.startfile(last)
+        except Exception:
+            img = cv2.imread(last, cv2.IMREAD_UNCHANGED)
+            if img is None:
+                print(f"'{last}' を開けませんでした。")
+            else:
+                show_image(img, title=os.path.basename(last))
